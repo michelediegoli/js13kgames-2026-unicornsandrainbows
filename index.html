@@ -83,7 +83,7 @@ newLevel();
 let keys = {};
 window.onkeydown = e => { if(e.key === ' ' && !started) { started = true; infoEl.style.display = ''; if(audio) audio.resume(); else sound('gem'); } keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
 window.onkeyup = e => keys[e.key.toLowerCase()] = false;
-window.onresize = () => { alert('Resized: game reset.'); document.location.reload(); };
+window.onresize = () => document.location.reload();
 
 function startScreen() {
     ctx.fillStyle = '#101018'; ctx.fillRect(0, 0, canvas.width, canvas.height);
