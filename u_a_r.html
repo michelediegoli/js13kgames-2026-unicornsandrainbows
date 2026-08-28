@@ -11,15 +11,15 @@
 </head>
 <body>
     <div id="info">
-        <h2>Rainbow Qix - Inversione dell'Apocalisse</h2>
-        <p>Muoviti con WASD / Frecce. <strong>Tieni premuto SPAZIO</strong> per lasciare una scia e conquistare il territorio!</p>
-        <p>Livello: <span id="level">1</span> | Coperto: <span id="pct">0</span>% | Obiettivo: <span id="target">55</span>% | Vite: <span id="lives">3</span></p>
+        <h2>Rainbow Qix</h2>
+        <p>Move with WASD / Arrow keys. <strong>Hold SPACE</strong> to leave a trail and claim territory!</p>
+        <p>Level: <span id="level">1</span> | Covered: <span id="pct">0</span>% | Goal: <span id="target">55</span>% | Lives: <span id="lives">3</span></p>
     </div>
     <canvas id="c" width="600" height="450"></canvas>
 
 <script>
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-const pctEl = document.getElementById('pct'), targetEl = document.getElementById('target'), livesEl = document.getElementById('lives'), levelEl = document.getElementById('level');
+const pctEl = document.getElementById('pct'), targetEl = document.getElementById('target'), livesEl = document.getElementById('lives'), levelEl = document.getElementById('level'), infoEl = document.getElementById('info');
 
 const ROWS = 45, COLS = 60, CELL = 10;
 // Matrice della griglia: 0 = Grigio (Vuoto), 1 = Sicuro (Bordo/Colorato), 2 = Scia in corso
@@ -30,7 +30,7 @@ for(let r=0; r<ROWS; r++) { grid[r][0] = 1; grid[r][COLS-1] = 1; }
 for(let c=0; c<COLS; c++) { grid[0][c] = 1; grid[ROWS-1][c] = 1; }
 
 let player = { r: 0, c: 0, drawing: false };
-let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45;
+let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45, started = false, blink = 0;
 
 function showNotice(text) { notice = text; noticeTime = 90; }
 function burst(x, y, color) { effects.push({x, y, color, time: 1}); }
@@ -66,9 +66,20 @@ newLevel();
 
 // Input
 let keys = {};
-window.onkeydown = e => { keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
+window.onkeydown = e => { if(e.key === ' ' && !started) { started = true; infoEl.style.display = ''; } keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
 window.onkeyup = e => keys[e.key.toLowerCase()] = false;
-window.onresize = () => { alert('Ridimensionamento: gioco resettato.'); document.location.reload(); };
+window.onresize = () => { alert('Resized: game reset.'); document.location.reload(); };
+
+function startScreen() {
+    ctx.fillStyle = '#101018'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for(let i = 0; i < 5; i++) for(let j = 0; j < 7; j++) {
+        ctx.strokeStyle = `hsl(${j * 50},90%,60%)`; ctx.lineWidth = 7;
+        ctx.beginPath(); ctx.arc(65 + i * 120, 270, 72 + j * 8, Math.PI, 0); ctx.stroke();
+    }
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 36px sans-serif';
+    ctx.fillText('RAINBOW QIX', canvas.width / 2, 115);
+    if((blink++ >> 4) % 2) { ctx.fillStyle = '#ffd84d'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('PRESS SPACE TO START', canvas.width / 2, 385); }
+}
 
 // Algoritmo Flood Fill (Riempimento di colore ricorsivo/iterativo)
 function floodFill(startR, startC) {
@@ -130,13 +141,13 @@ function processConquest() {
     pct = Math.floor((safeCount / (ROWS * COLS)) * 100);
     pctEl.innerText = pct;
     let gained = Math.floor((safeCount - oldSafe) * 100 / (ROWS * COLS));
-    showNotice(pct >= target ? 'Obiettivo superato! ' + pct + '%' : '+' + gained + '% conquistato | totale ' + pct + '%');
+    showNotice(pct >= target ? 'Goal reached! ' + pct + '%' : '+' + gained + '% claimed | total ' + pct + '%');
     
     if(pct >= target) {
-        if(level >= 8) { alert("L'arcobaleno e' salvo!"); document.location.reload(); }
+        if(level >= 8) { alert('The rainbow is safe!'); document.location.reload(); }
         else {
             newLevel();
-            showNotice('Livello ' + level + ' | completa ' + target + '% | vite: ' + lives);
+            showNotice('Level ' + level + ' | claim ' + target + '% | lives: ' + lives);
         }
     }
 }
@@ -151,6 +162,7 @@ function resetTrail() {
 
 let moveCooldown = 0;
 function loop() {
+    if(!started) { startScreen(); requestAnimationFrame(loop); return; }
     enemies.forEach(enemy => {
         let sr = Math.min(ROWS - 1, Math.max(0, Math.floor(enemy.y / CELL)));
         let sc = Math.min(COLS - 1, Math.max(0, Math.floor(enemy.x / CELL)));
@@ -172,7 +184,7 @@ function loop() {
         if(grid[sr][sc] === 2) {
             burst(enemy.x, enemy.y, '#ff70c8');
             lives--; livesEl.innerText = lives;
-            if(lives <= 0) { alert("Il grigiore ha soffocato l'unicorno. Game Over!"); document.location.reload(); }
+            if(lives <= 0) { alert('The gloom overwhelmed the unicorn. Game Over!'); document.location.reload(); }
             else resetTrail();
         }
         if(--enemy.fire <= 0) {
@@ -187,7 +199,7 @@ function loop() {
         if(grid[player.r][player.c] !== 1 && Math.hypot(shot.x - (player.c * CELL + 5), shot.y - (player.r * CELL + 5)) < 7) {
             burst(player.c * CELL + 5, player.r * CELL + 5, '#ff70c8');
             lives--; livesEl.innerText = lives;
-            if(lives <= 0) { alert("Il grigiore ha soffocato l'unicorno. Game Over!"); document.location.reload(); }
+            if(lives <= 0) { alert('The gloom overwhelmed the unicorn. Game Over!'); document.location.reload(); }
             else resetTrail();
             return false;
         }
