@@ -77,8 +77,7 @@ function startScreen() {
         ctx.strokeStyle = `hsl(${j * 50},90%,60%)`; ctx.lineWidth = 7;
         ctx.beginPath(); ctx.arc(65 + i * 120, 270, 72 + j * 8, Math.PI, 0); ctx.stroke();
     }
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 36px sans-serif';
-    ctx.fillText('RAINBOW QIX', canvas.width / 2, 115);
+    ctx.textAlign = 'center';
     if((blink++ >> 4) % 2) { ctx.fillStyle = '#ffd84d'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('PRESS SPACE TO START', canvas.width / 2, 385); }
 }
 
