@@ -11,15 +11,15 @@
 </head>
 <body>
     <div id="info">
-        <h2>Rainbow Qix</h2>
+        <h2>Endless Rainbow Qix</h2>
         <p>Move with WASD / Arrow keys. <strong>Hold SPACE</strong> to leave a trail and claim territory!</p>
-        <p>Level: <span id="level">1</span> | Covered: <span id="pct">0</span>% | Goal: <span id="target">55</span>% | Lives: <span id="lives">3</span></p>
+        <p>Level: <span id="level">1</span> | Covered: <span id="pct">0</span>% | Goal: <span id="target">55</span>% | Lives: <span id="lives">3</span> | Enemies: <span id="enemies">0</span></p>
     </div>
     <canvas id="c" width="600" height="450"></canvas>
 
 <script>
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-const pctEl = document.getElementById('pct'), targetEl = document.getElementById('target'), livesEl = document.getElementById('lives'), levelEl = document.getElementById('level'), infoEl = document.getElementById('info');
+const pctEl = document.getElementById('pct'), targetEl = document.getElementById('target'), livesEl = document.getElementById('lives'), enemiesEl = document.getElementById('enemies'), levelEl = document.getElementById('level'), infoEl = document.getElementById('info');
 
 const ROWS = 45, COLS = 60, CELL = 10;
 // Matrice della griglia: 0 = Grigio (Vuoto), 1 = Sicuro (Bordo/Colorato), 2 = Scia in corso
@@ -58,6 +58,7 @@ function newLevel() {
         let angle = .65 + i * 1.7, speed = 1.25 + level * .28;
         return {x: 100 + i * 53, y: 120 + (i % 3) * 80, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, fire: 50 + i * 20};
     });
+    enemiesEl.innerText = enemies.length;
     shots = [];
     pct = 0;
     pctEl.innerText = 0;
@@ -107,8 +108,8 @@ function processConquest() {
     let segments = [], oldSafe = 0;
     let visitedGlobal = Array(ROWS).fill().map(() => Array(COLS).fill(false));
 
-    for(let r=0; r<ROWS; r++) {
-        for(let c=0; c<COLS; c++) {
+    for(let r=1; r<ROWS-1; r++) {
+        for(let c=1; c<COLS-1; c++) {
             if(grid[r][c] === 1) oldSafe++;
             if(grid[r][c] === 0 && !visitedGlobal[r][c]) {
                 let res = floodFill(r, c);
@@ -135,12 +136,13 @@ function processConquest() {
         if(grid[r][c] === 1) { burst(enemy.x, enemy.y, '#fff'); return false; }
         return grid[r][c] !== 1;
     });
+    enemiesEl.innerText = enemies.length;
     // Ricalcola percentuale
     let safeCount = 0;
-    for(let r=0; r<ROWS; r++) { for(let c=0; c<COLS; c++) { if(grid[r][c] === 1) safeCount++; } }
-    pct = Math.floor((safeCount / (ROWS * COLS)) * 100);
+    for(let r=1; r<ROWS-1; r++) { for(let c=1; c<COLS-1; c++) { if(grid[r][c] === 1) safeCount++; } }
+    pct = Math.floor((safeCount / ((ROWS - 2) * (COLS - 2))) * 100);
     pctEl.innerText = pct;
-    let gained = Math.floor((safeCount - oldSafe) * 100 / (ROWS * COLS));
+    let gained = Math.floor((safeCount - oldSafe) * 100 / ((ROWS - 2) * (COLS - 2)));
     showNotice(pct >= target ? 'Goal reached! ' + pct + '%' : '+' + gained + '% claimed | total ' + pct + '%');
     
     if(pct >= target) {
