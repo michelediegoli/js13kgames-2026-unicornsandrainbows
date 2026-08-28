@@ -29,11 +29,22 @@ let grid = Array(ROWS).fill().map(() => Array(COLS).fill(0));
 for(let r=0; r<ROWS; r++) { grid[r][0] = 1; grid[r][COLS-1] = 1; }
 for(let c=0; c<COLS; c++) { grid[0][c] = 1; grid[ROWS-1][c] = 1; }
 
-let player = { r: 0, c: 0, drawing: false };
-let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45, started = false, blink = 0;
+let player = { r: 0, c: 0, drawing: false, turns: 0, slow: false, rainbow: 0, dr: 0, dc: 1, lastDr: 0, lastDc: 0 };
+let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], playerShots = [], gems = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45, started = false, blink = 0, audio;
 
 function showNotice(text) { notice = text; noticeTime = 90; }
 function burst(x, y, color) { effects.push({x, y, color, time: 1}); }
+function sound(type) {
+    if(!audio) audio = new AudioContext();
+    let n = audio.createOscillator(), g = audio.createGain(), f = {move:220, enemy:90, hit:55, kill:520, gem:700, fire:360}[type] || 220;
+    n.frequency.value = f; n.type = type === 'fire' || type === 'gem' ? 'sine' : 'square'; g.gain.value = .035; n.connect(g); g.connect(audio.destination); n.start(); n.stop(audio.currentTime + (type === 'kill' ? .14 : .06));
+}
+function collectGem(gem) {
+    if(gem.type) { player.rainbow = 300; showNotice('Rainbow gem: rainbow fire!'); }
+    else { player.slow = true; showNotice('Blue gem: slow movement!'); }
+    sound('gem');
+    burst(gem.c * CELL + 5, gem.r * CELL + 5, gem.type ? '#ffd84d' : '#54e8ff');
+}
 
 function makeImage() {
     seed = (Math.random() * 360) | 0;
@@ -53,13 +64,16 @@ function newLevel() {
     grid = Array(ROWS).fill().map(() => Array(COLS).fill(0));
     for(let r=0; r<ROWS; r++) { grid[r][0] = 1; grid[r][COLS-1] = 1; }
     for(let c=0; c<COLS; c++) { grid[0][c] = 1; grid[ROWS-1][c] = 1; }
-    player.r = 0; player.c = 0; player.drawing = false;
+    player.r = 0; player.c = 0; player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
+    player.slow = false; player.rainbow = 0; player.dr = 0; player.dc = 1;
     enemies = Array.from({length: Math.min(1 + level, 8)}, (_, i) => {
         let angle = .65 + i * 1.7, speed = 1.25 + level * .28;
         return {x: 100 + i * 53, y: 120 + (i % 3) * 80, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, fire: 50 + i * 20};
     });
     enemiesEl.innerText = enemies.length;
     shots = [];
+    playerShots = [];
+    gems = Array.from({length: Math.min(3 + level, 10)}, (_, i) => ({r: 3 + (i * 7 + level * 3) % (ROWS - 6), c: 4 + (i * 13 + level * 5) % (COLS - 8), type: i % 2}));
     pct = 0;
     pctEl.innerText = 0;
 }
@@ -67,7 +81,7 @@ newLevel();
 
 // Input
 let keys = {};
-window.onkeydown = e => { if(e.key === ' ' && !started) { started = true; infoEl.style.display = ''; } keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
+window.onkeydown = e => { if(e.key === ' ' && !started) { started = true; infoEl.style.display = ''; if(audio) audio.resume(); else sound('gem'); } keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
 window.onkeyup = e => keys[e.key.toLowerCase()] = false;
 window.onresize = () => { alert('Resized: game reset.'); document.location.reload(); };
 
@@ -78,6 +92,8 @@ function startScreen() {
         ctx.beginPath(); ctx.arc(65 + i * 120, 270, 72 + j * 8, Math.PI, 0); ctx.stroke();
     }
     ctx.textAlign = 'center';
+    ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#54e8ff'; ctx.fillText('◆  SLOW GEM: SLOWS YOU', 180, 320);
+    ctx.fillStyle = '#ffd84d'; ctx.fillText('◆  RAINBOW GEM: RAINBOW FIRE', 420, 320);
     if((blink++ >> 4) % 2) { ctx.fillStyle = '#ffd84d'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('PRESS SPACE TO START', canvas.width / 2, 385); }
 }
 
@@ -129,10 +145,14 @@ function processConquest() {
         clearSegments = [segments.reduce((smallest, seg) => seg.filled.length < smallest.filled.length ? seg : smallest)];
     }
     clearSegments.forEach(seg => seg.filled.forEach(([fr, fc]) => grid[fr][fc] = 1));
+    gems = gems.filter(gem => {
+        if(grid[gem.r][gem.c] === 1) { collectGem(gem); return false; }
+        return true;
+    });
     enemies = enemies.filter(enemy => {
         let r = Math.min(ROWS - 1, Math.max(0, Math.floor(enemy.y / CELL)));
         let c = Math.min(COLS - 1, Math.max(0, Math.floor(enemy.x / CELL)));
-        if(grid[r][c] === 1) { burst(enemy.x, enemy.y, '#fff'); return false; }
+        if(grid[r][c] === 1) { burst(enemy.x, enemy.y, '#fff'); sound('kill'); return false; }
         return grid[r][c] !== 1;
     });
     enemiesEl.innerText = enemies.length;
@@ -158,7 +178,18 @@ function resetTrail() {
         for(let c=0; c<COLS; c++) { if(grid[r][c] === 2) grid[r][c] = 0; }
     }
     player.r = 0; player.c = 0; // Rimanda il giocatore all'angolo sicuro
-    player.drawing = false;
+    player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
+    player.slow = false; player.rainbow = 0; playerShots = [];
+}
+
+function cancelTrail() {
+    for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) if(grid[r][c] === 2) grid[r][c] = 0;
+    player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
+    showNotice('Draw an area, not a line');
+}
+
+function safeEdge(r, c) {
+    return r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1 || grid[r - 1][c] !== 1 || grid[r + 1][c] !== 1 || grid[r][c - 1] !== 1 || grid[r][c + 1] !== 1;
 }
 
 let moveCooldown = 0;
@@ -184,12 +215,14 @@ function loop() {
         sc = Math.min(COLS-1, Math.max(0, Math.floor(enemy.x / CELL)));
         if(grid[sr][sc] === 2) {
             burst(enemy.x, enemy.y, '#ff70c8');
+            sound('hit');
             lives--; livesEl.innerText = lives;
             if(lives <= 0) { alert('The gloom overwhelmed the unicorn. Game Over!'); document.location.reload(); }
             else resetTrail();
         }
         if(--enemy.fire <= 0) {
             let length = Math.hypot(enemy.vx, enemy.vy);
+            sound('enemy');
             shots.push({x: enemy.x, y: enemy.y, vx: enemy.vx / length * 2.8, vy: enemy.vy / length * 2.8});
             enemy.fire = Math.max(28, 75 - level * 5);
         }
@@ -199,6 +232,7 @@ function loop() {
         shot.x += shot.vx; shot.y += shot.vy;
         if(grid[player.r][player.c] !== 1 && Math.hypot(shot.x - (player.c * CELL + 5), shot.y - (player.r * CELL + 5)) < 7) {
             burst(player.c * CELL + 5, player.r * CELL + 5, '#ff70c8');
+            sound('hit');
             lives--; livesEl.innerText = lives;
             if(lives <= 0) { alert('The gloom overwhelmed the unicorn. Game Over!'); document.location.reload(); }
             else resetTrail();
@@ -216,27 +250,44 @@ function loop() {
         else if (keys['d'] || keys['arrowright']) dc = 1;
 
         if(dr !== 0 || dc !== 0) {
+            player.dr = dr; player.dc = dc;
             let nr = player.r + dr, nc = player.c + dc;
             if(nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
                 let targetCell = grid[nr][nc];
                 let isSpacePressed = keys[' '];
 
-                if(targetCell === 1) { // Si muove su zona sicura
+                if(targetCell === 1 && safeEdge(nr, nc)) { // Si muove sul bordo sicuro
                     if(player.drawing) { // Stava disegnando e ha appena chiuso il recinto!
-                        processConquest();
+                        if(player.turns) processConquest(); else cancelTrail();
                         player.drawing = false;
                     }
                     player.r = nr; player.c = nc;
+                    sound('move');
                 } 
                 else if(targetCell === 0 && isSpacePressed) { // Entra nel vuoto grigio lasciando la scia
                     player.drawing = true;
+                    if(player.lastDr && (player.lastDr !== dr || player.lastDc !== dc)) player.turns++;
+                    player.lastDr = dr; player.lastDc = dc;
                     grid[nr][nc] = 2; // Lascia scia
                     player.r = nr; player.c = nc;
+                    sound('move');
                 }
-                moveCooldown = 4; // Rallenta leggermente la velocità di movimento sulla griglia
+                gems = gems.filter(gem => gem.r !== nr || gem.c !== nc || (collectGem(gem), false));
+                enemiesEl.innerText = enemies.length;
+                moveCooldown = player.slow ? 8 : 4;
             }
         }
     } else { moveCooldown--; }
+    if(player.rainbow > 0) {
+        player.rainbow--;
+        if(player.rainbow % 12 === 0) { sound('fire'); playerShots.push({x: player.c * CELL + 5, y: player.r * CELL + 5, vx: player.dc * 4, vy: player.dr * 4}); }
+    }
+    playerShots = playerShots.filter(shot => {
+        shot.x += shot.vx; shot.y += shot.vy;
+        let hit = enemies.findIndex(enemy => Math.hypot(shot.x - enemy.x, shot.y - enemy.y) < 10);
+        if(hit >= 0) { burst(enemies[hit].x, enemies[hit].y, '#ffd84d'); sound('kill'); enemies.splice(hit, 1); enemiesEl.innerText = enemies.length; return false; }
+        return shot.x > 0 && shot.x < canvas.width && shot.y > 0 && shot.y < canvas.height;
+    });
 
     // RENDERING
     ctx.clearRect(0,0, canvas.width, canvas.height);
@@ -261,6 +312,12 @@ function loop() {
         }
     }
 
+    gems.forEach(gem => {
+        let x = gem.c * CELL + 5, y = gem.r * CELL + 5;
+        ctx.fillStyle = gem.type ? '#ffd84d' : '#54e8ff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 6, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    });
+
     // Disegna l'Unicorno (Giocatore)
     effects = effects.filter(effect => {
         effect.time -= .08;
@@ -282,6 +339,9 @@ function loop() {
 
     shots.forEach(shot => {
         ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(shot.x, shot.y, 2, 0, 7); ctx.fill();
+    });
+    playerShots.forEach(shot => {
+        ctx.fillStyle = `hsl(${(blink++ * 30) % 360},100%,60%)`; ctx.beginPath(); ctx.arc(shot.x, shot.y, 3, 0, 7); ctx.fill();
     });
 
     enemies.forEach(enemy => {
