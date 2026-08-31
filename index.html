@@ -2,11 +2,26 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Rainbow Qix - js13k</title>
     <style>
-        body { margin: 0; background: #111; display: flex; flex-direction: column; align-contents: center; justify-content: center; height: 100vh; font-family: sans-serif; color: #fff; overflow: hidden; }
-        canvas { background: #222; box-shadow: 0 0 20px #000; margin: auto; width:min(96vw,900px) }
+        body { margin: 0; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; color: #fff; overflow: hidden; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+        #game-wrap { position: relative; margin: auto; width: min(96vw, 600px); }
+        canvas { background: #222; box-shadow: 0 0 20px #000; width: 100%; height: auto; display: block; }
         #info { text-align: center; margin-bottom: 5px; text-shadow: 1px 1px 2px #000; }
+        #touch-controls { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .dpad { position: absolute; left: 6px; bottom: 6px; width: 126px; height: 126px; pointer-events: none; }
+        .touch-btn { position: absolute; width: 38px; height: 38px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; color: #fff; font-size: 16px; display: flex; align-items: center; justify-content: center; pointer-events: auto; touch-action: manipulation; opacity: 0.45; }
+        #t-up { bottom: 84px; left: 44px; }
+        #t-down { bottom: 4px; left: 44px; }
+        #t-left { bottom: 44px; left: 4px; }
+        #t-right { bottom: 44px; left: 84px; }
+        #t-draw { right: 6px; bottom: 44px; width: 54px; height: 54px; font-size: 10px; font-weight: bold; background: rgba(255,100,150,0.15); border-color: rgba(255,100,150,0.4); border-radius: 50%; }
+        .is-mobile #touch-controls { display: block; }
+        @media (max-width: 640px) {
+            #info h2 { font-size: 15px; margin: 4px 0; }
+            #info p { font-size: 10px; margin: 2px 0; }
+        }
     </style>
 </head>
 <body>
@@ -15,22 +30,36 @@
         <p>Move with WASD / Arrow keys. <strong>Hold SPACE</strong> to leave a trail and claim territory!</p>
         <p>Level: <span id="level">1</span> | Covered: <span id="pct">0</span>% | Goal: <span id="target">55</span>% | Lives: <span id="lives">3</span> | Enemies: <span id="enemies">0</span></p>
     </div>
-    <canvas id="c" width="600" height="450"></canvas>
+    <div id="game-wrap">
+        <canvas id="c" width="600" height="450"></canvas>
+        <div id="touch-controls">
+            <div class="dpad">
+                <div class="touch-btn" id="t-up">▲</div>
+                <div class="touch-btn" id="t-left">◀</div>
+                <div class="touch-btn" id="t-right">▶</div>
+                <div class="touch-btn" id="t-down">▼</div>
+            </div>
+            <div class="touch-btn" id="t-draw">DRAW</div>
+        </div>
+    </div>
 
 <script>
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const pctEl = document.getElementById('pct'), targetEl = document.getElementById('target'), livesEl = document.getElementById('lives'), enemiesEl = document.getElementById('enemies'), levelEl = document.getElementById('level'), infoEl = document.getElementById('info');
 
 const ROWS = 45, COLS = 60, CELL = 10;
-// Matrice della griglia: 0 = Grigio (Vuoto), 1 = Sicuro (Bordo/Colorato), 2 = Scia in corso
 let grid = Array(ROWS).fill().map(() => Array(COLS).fill(0));
 
-// Crea la cornice iniziale sicura (i bordi esterni dello schermo)
 for(let r=0; r<ROWS; r++) { grid[r][0] = 1; grid[r][COLS-1] = 1; }
 for(let c=0; c<COLS; c++) { grid[0][c] = 1; grid[ROWS-1][c] = 1; }
 
 let player = { r: 0, c: 0, drawing: false, turns: 0, slow: false, rainbow: 0, dr: 0, dc: 1, lastDr: 0, lastDc: 0 };
-let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], playerShots = [], gems = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45, started = false, blink = 0, audio;
+let level = 0, lives = 3, pct = 0, target = 55, seed = 0, enemies = [], shots = [], playerShots = [], gems = [], effects = [], notice = '', noticeTime = 0, fade = 0, fadeWait = 45, started = false, blink = 0, audio, moveCooldown = 0;
+
+function isMobile() {
+    return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768 || /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+if(isMobile()) document.body.classList.add('is-mobile');
 
 function showNotice(text) { notice = text; noticeTime = 90; }
 function burst(x, y, color) { effects.push({x, y, color, time: 1}); }
@@ -66,6 +95,7 @@ function newLevel() {
     for(let c=0; c<COLS; c++) { grid[0][c] = 1; grid[ROWS-1][c] = 1; }
     player.r = 0; player.c = 0; player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
     player.slow = false; player.rainbow = 0; player.dr = 0; player.dc = 1;
+    moveCooldown = 0;
     enemies = Array.from({length: Math.min(1 + level, 8)}, (_, i) => {
         let angle = .65 + i * 1.7, speed = 1.25 + level * .28;
         return {x: 100 + i * 53, y: 120 + (i % 3) * 80, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, fire: 50 + i * 20};
@@ -79,11 +109,29 @@ function newLevel() {
 }
 newLevel();
 
-// Input
 let keys = {};
 window.onkeydown = e => { if(e.key === ' ' && !started) { started = true; infoEl.style.display = ''; if(audio) audio.resume(); else sound('gem'); } keys[e.key.toLowerCase()] = true; if(e.key === ' ') e.preventDefault(); };
 window.onkeyup = e => keys[e.key.toLowerCase()] = false;
-window.onresize = () => document.location.reload();
+
+// Touch controls
+(function(){
+    let map = { 't-up':'arrowup', 't-down':'arrowdown', 't-left':'arrowleft', 't-right':'arrowright', 't-draw':' ' };
+    for(let id in map){
+        let el = document.getElementById(id);
+        if(!el) continue;
+        let k = map[id];
+        el.addEventListener('touchstart', e => { 
+            e.preventDefault(); 
+            if(k === ' ' && !started) { started = true; infoEl.style.display = ''; if(audio) audio.resume(); else sound('gem'); }
+            keys[k] = true; 
+            el.style.opacity = '0.85'; 
+        });
+        el.addEventListener('touchend', e => { e.preventDefault(); keys[k] = false; el.style.opacity = '0.45'; });
+        el.addEventListener('touchcancel', e => { keys[k] = false; el.style.opacity = '0.45'; });
+    }
+    canvas.addEventListener('touchstart', e => e.preventDefault());
+    canvas.addEventListener('touchmove', e => e.preventDefault());
+})();
 
 function startScreen() {
     ctx.fillStyle = '#101018'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -94,10 +142,12 @@ function startScreen() {
     ctx.textAlign = 'center';
     ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#54e8ff'; ctx.fillText('◆  SLOW GEM: SLOWS YOU', 180, 320);
     ctx.fillStyle = '#ffd84d'; ctx.fillText('◆  RAINBOW GEM: RAINBOW FIRE', 420, 320);
-    if((blink++ >> 4) % 2) { ctx.fillStyle = '#ffd84d'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('PRESS SPACE TO START', canvas.width / 2, 385); }
+    if((blink++ >> 4) % 2) { 
+        ctx.fillStyle = '#ffd84d'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(isMobile() ? 'TAP DRAW TO START' : 'PRESS SPACE TO START', canvas.width / 2, 385);
+    }
 }
 
-// Algoritmo Flood Fill (Riempimento di colore ricorsivo/iterativo)
 function floodFill(startR, startC) {
     let queue = [[startR, startC]], filled = [];
     let visited = Array(ROWS).fill().map(() => Array(COLS).fill(false));
@@ -119,7 +169,6 @@ function floodFill(startR, startC) {
 }
 
 function processConquest() {
-    // Quando chiudiamo una forma, cerchiamo tutte le aree grigie rimaste
     let segments = [], oldSafe = 0;
     let visitedGlobal = Array(ROWS).fill().map(() => Array(COLS).fill(false));
 
@@ -133,7 +182,6 @@ function processConquest() {
             }
         }
     }
-    // Trasforma la scia arcobaleno (2) in zona sicura colorata (1)
     for(let r=0; r<ROWS; r++) {
         for(let c=0; c<COLS; c++) { if(grid[r][c] === 2) grid[r][c] = 1; }
     }
@@ -156,15 +204,15 @@ function processConquest() {
         return grid[r][c] !== 1;
     });
     enemiesEl.innerText = enemies.length;
-    // Ricalcola percentuale
     let safeCount = 0;
     for(let r=1; r<ROWS-1; r++) { for(let c=1; c<COLS-1; c++) { if(grid[r][c] === 1) safeCount++; } }
     pct = Math.floor((safeCount / ((ROWS - 2) * (COLS - 2))) * 100);
     pctEl.innerText = pct;
     let gained = Math.floor((safeCount - oldSafe) * 100 / ((ROWS - 2) * (COLS - 2)));
     showNotice(pct >= target ? 'Goal reached! ' + pct + '%' : '+' + gained + '% claimed | total ' + pct + '%');
-    
+
     if(pct >= target) {
+        player.r = 0; player.c = 0; player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
         if(level >= 8) { alert('The rainbow is safe!'); document.location.reload(); }
         else {
             newLevel();
@@ -177,7 +225,7 @@ function resetTrail() {
     for(let r=0; r<ROWS; r++) {
         for(let c=0; c<COLS; c++) { if(grid[r][c] === 2) grid[r][c] = 0; }
     }
-    player.r = 0; player.c = 0; // Rimanda il giocatore all'angolo sicuro
+    player.r = 0; player.c = 0;
     player.drawing = false; player.turns = 0; player.lastDr = 0; player.lastDc = 0;
     player.slow = false; player.rainbow = 0; playerShots = [];
 }
@@ -189,10 +237,10 @@ function cancelTrail() {
 }
 
 function safeEdge(r, c) {
-    return r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1 || grid[r - 1][c] !== 1 || grid[r + 1][c] !== 1 || grid[r][c - 1] !== 1 || grid[r][c + 1] !== 1;
+    if(r === 0 || c === 0 || r === ROWS - 1 || c === COLS - 1) return true;
+    return grid[r - 1][c] !== 1 || grid[r + 1][c] !== 1 || grid[r][c - 1] !== 1 || grid[r][c + 1] !== 1;
 }
 
-let moveCooldown = 0;
 function loop() {
     if(!started) { startScreen(); requestAnimationFrame(loop); return; }
     enemies.forEach(enemy => {
@@ -241,7 +289,6 @@ function loop() {
         return shot.x > 0 && shot.x < canvas.width && shot.y > 0 && shot.y < canvas.height;
     });
 
-    // Movimento Giocatore a griglia sincrona
     if(moveCooldown <= 0) {
         let dr = 0, dc = 0;
         if (keys['w'] || keys['arrowup']) dr = -1;
@@ -256,25 +303,33 @@ function loop() {
                 let targetCell = grid[nr][nc];
                 let isSpacePressed = keys[' '];
 
-                if(targetCell === 1 && safeEdge(nr, nc)) { // Si muove sul bordo sicuro
-                    if(player.drawing) { // Stava disegnando e ha appena chiuso il recinto!
+                let moved = false;
+                if(targetCell === 1 && safeEdge(nr, nc)) {
+                    let levelBefore = level;
+                    if(player.drawing) {
                         if(player.turns) processConquest(); else cancelTrail();
                         player.drawing = false;
                     }
-                    player.r = nr; player.c = nc;
-                    sound('move');
+                    if(level === levelBefore) {
+                        player.r = nr; player.c = nc;
+                        sound('move');
+                        moved = true;
+                    }
                 } 
-                else if(targetCell === 0 && isSpacePressed) { // Entra nel vuoto grigio lasciando la scia
+                else if(targetCell === 0 && isSpacePressed) {
                     player.drawing = true;
                     if(player.lastDr && (player.lastDr !== dr || player.lastDc !== dc)) player.turns++;
                     player.lastDr = dr; player.lastDc = dc;
-                    grid[nr][nc] = 2; // Lascia scia
+                    grid[nr][nc] = 2;
                     player.r = nr; player.c = nc;
                     sound('move');
+                    moved = true;
                 }
-                gems = gems.filter(gem => gem.r !== nr || gem.c !== nc || (collectGem(gem), false));
-                enemiesEl.innerText = enemies.length;
-                moveCooldown = player.slow ? 8 : 4;
+                if(moved) {
+                    gems = gems.filter(gem => gem.r !== nr || gem.c !== nc || (collectGem(gem), false));
+                    enemiesEl.innerText = enemies.length;
+                    moveCooldown = player.slow ? 8 : 4;
+                }
             }
         }
     } else { moveCooldown--; }
@@ -289,22 +344,17 @@ function loop() {
         return shot.x > 0 && shot.x < canvas.width && shot.y > 0 && shot.y < canvas.height;
     });
 
-    // RENDERING
     ctx.clearRect(0,0, canvas.width, canvas.height);
 
-    // Disegna la griglia di gioco
     for(let r=0; r<ROWS; r++) {
         for(let c=0; c<COLS; c++) {
             if(grid[r][c] === 1) {
-                // Territorio sicuro / Purificato (Prato colorato generato via HSL)
                 ctx.fillStyle = `hsl(${(image[r*COLS+c]*360+level*20)%360}, 80%, 55%)`; 
                 ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
             } else if(grid[r][c] === 2) {
-                // Scia Arcobaleno attiva
                 ctx.fillStyle = `hsl(${(c*20)%360}, 100%, 60%)`;
                 ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
             } else {
-                // Mondo Grigio / Apocalittico
                 let gray = 22 + (image[r*COLS+c] * 24 | 0);
                 ctx.fillStyle = `rgb(${gray},${gray},${gray})`;
                 ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
@@ -318,7 +368,6 @@ function loop() {
         ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 6, y); ctx.closePath(); ctx.fill(); ctx.stroke();
     });
 
-    // Disegna l'Unicorno (Giocatore)
     effects = effects.filter(effect => {
         effect.time -= .08;
         ctx.globalAlpha = effect.time;
@@ -327,7 +376,6 @@ function loop() {
         ctx.globalAlpha = 1;
         return effect.time > 0;
     });
-    // Disegna l'Unicorno (Giocatore)
     let px = player.c*CELL + 5, py = player.r*CELL + 5;
     ctx.save();
     ctx.translate(px, py);
